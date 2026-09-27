@@ -34,11 +34,23 @@ def _photo_or_placeholder(name, W, H, p, **kw):
         return img
 
 
+PHOTO_EASE = None  # optional fn(c) -> ease fn, set by the edit (velocity-style moves in drops)
+
+
+def velocity(p):
+    """Snap-then-drift: most of the move happens in the first frames (velocity edit feel)."""
+    return 0.65 * ease_out_expo(min(p * 1.6, 1.0)) + 0.35 * p
+
+
 def S_photo(name, zoom=(1.0, 1.12), center=((0.5, 0.5), (0.5, 0.5)), rot=(0.0, 0.0),
             grade=None, contrast=1.3, fxs=(), flip=False, ease=None, pdur=None):
     """Still with Ken Burns move + grade + fx chain. pdur: seconds the move spans (default shot dur)."""
     def f(c):
         p = c.lt / (pdur or c.dur)
+        if ease is None and PHOTO_EASE is not None:
+            e = PHOTO_EASE(c)
+            if e is not None:
+                p = e(min(max(p, 0), 1))
         img = _photo_or_placeholder(name, c.W, c.H, min(max(p, 0), 1.5), zoom=zoom, center=center,
                                     rot=rot, flip=flip, ease=ease)
         if grade:
@@ -632,4 +644,28 @@ def S_band(name, grade=None, contrast=1.3, zoom=(1.0, 1.08), bg_grade="blue", bl
         xs0, xs1 = max(0, -x0), min(bw, W - x0)
         bg[max(y0, 0):y0 + bh, max(x0, 0):max(x0, 0) + (xs1 - xs0)] = band[max(0, -y0):max(0, -y0) + min(bh, H), xs0:xs1]
         return bg
+    return f
+
+
+def O_impact_frames(times, dur=2 / 30, colors=((PAL["red"], PAL["black"]), (PAL["white"], PAL["black"]))):
+    """Manga impact frames: for `dur` after each time (global s), the frame becomes a
+    2-tone threshold (alternating palettes), with a slight zoom."""
+    ts = sorted(times)
+
+    def f(c, img):
+        import bisect
+        i = bisect.bisect_right(ts, c.t + 1e-6) - 1
+        if i < 0 or c.t - ts[i] >= dur:
+            return img
+        light, dark = colors[i % len(colors)]
+        out = fx.threshold(img, float(np.median(fx.luma(img))), dark, light)
+        return fx.affine(out, zoom=1.06)
+    return f
+
+
+def O_cowbell_tick(amt=5.0, decay=0.05):
+    """Tiny chroma kick on every cowbell note (keeps the frame alive between drums)."""
+    def f(c, img):
+        v = c.bm.pulse(c.bm.cowbell, c.t, decay) if c.bm.cowbell else 0
+        return fx.rgb_split(img, amt * v * c.W / 1920, 1.2) if v > 0.15 else img
     return f

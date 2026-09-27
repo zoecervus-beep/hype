@@ -27,7 +27,6 @@ Line encoding: a list of flat int lists.
 from __future__ import annotations
 
 import json
-import math
 import os
 import sys
 import urllib.request
@@ -37,7 +36,7 @@ import numpy as np
 try:
     import shapely
     from shapely.geometry import (GeometryCollection, LineString, MultiLineString,
-                                  MultiPolygon, Point, Polygon, box, shape)
+                                  MultiPolygon, Polygon, box, shape)
     from shapely.ops import linemerge, polylabel, unary_union
 except ImportError:  # pragma: no cover
     sys.exit("geo_build.py needs shapely at build time:  pip install shapely")
@@ -59,9 +58,6 @@ FILES = ["ne_10m_admin_0_countries.geojson", "ne_50m_admin_0_countries.geojson",
 def fetch(name: str) -> str:
     os.makedirs(SRC, exist_ok=True)
     path = os.path.join(SRC, name)
-    legacy = os.path.join(ROOT, "out", "cache", "ne", name)
-    if not os.path.exists(path) and os.path.exists(legacy):
-        os.replace(legacy, path)
     if not os.path.exists(path):
         print("  downloading", name)
         tmp = path + ".part"

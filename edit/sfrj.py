@@ -488,19 +488,49 @@ def outro(tl):
         T("1945 — 1992", "mono", 0.045, GOLD, 0.5, 0.88, at=0.9, s0=1.0, slam=0.4, tracking=0.3)(c, img)
         fade = min(max((c.lt - (c.dur - 1.6)) / 1.6, 0), 1)
         return img * (1 - fade)
-    cut(tl, 176, 176 + 11, final)
+    cut(tl, 176, 176 + 10.6, final)
     fl(tl, 176, WHITE, 0.2)
 
 
 # ====================================================================== GLOBAL
+def credits(tl):
+    """Photo credits card (the archive photos are CC BY / BY-SA; full list in CREDITS.md)."""
+    lines = ["FOTOGRAFIJE / PHOTOS",
+             "Wikimedia Commons contributors · Museum of Yugoslavia (CC BY-SA 3.0 RS)",
+             "Flickr contributors (CC BY 2.0) · public domain archive images",
+             "full attribution list: CREDITS.md",
+             "",
+             "music, maps, 3D and graphics generated in code"]
+
+    def f(c):
+        img = blank(c.W, c.H, BLACK)
+        for k, s in enumerate(lines):
+            if not s:
+                continue
+            L = tx.text_layer(s, "anton" if k == 0 else "mono", int(c.H * (0.05 if k == 0 else 0.022)),
+                              GOLD if k == 0 else WHITE, tracking=0.05 if k == 0 else 0.08)
+            tx.place(img, L, 0.5, 0.36 + k * 0.06, opacity=min(1.0, c.lt * 3))
+        return img
+    tl.shot(86.3, 89.3, f, "credits")
+
+
 def build_timeline():
-    tl = Timeline(W_, H_, 30, duration=86.0)
+    import edit.kit as kit
+    kit.PHOTO_EASE = lambda c: kit.velocity if (b(32) <= c.t < b(96) or b(112) <= c.t < b(176)) else None
+    tl = Timeline(W_, H_, 30, duration=89.3)
     intro(tl)
     buildup(tl)
     dropA(tl)
     brk(tl)
     dropB(tl)
     outro(tl)
+    credits(tl)
+    # impact frames: first beat of every 2-bar phrase in the drops + every snare in the finale
+    hits = [b(n) for n in range(40, 96, 8)] + [b(n) for n in range(120, 160, 8)]
+    hits += [t for t in tl.bm.snare if b(160) <= t < b(175)]
+    tl.op(0, tl.duration, O_impact_frames(hits), z=44, name="impact-frames")
+    tl.op(b(32), b(96), O_cowbell_tick(5.0), z=43)
+    tl.op(b(112), b(175), O_cowbell_tick(7.0), z=43)
     # letterbox: 2.39:1 in intro, closing tighter through the build, gone on the drop
     def lb(c):
         if c.t < b(16):
