@@ -5,3 +5,4 @@ out/stills/
 out/preview/
 out/*.mp4
 !out/sfrj_hype.mp4
+*.whl
