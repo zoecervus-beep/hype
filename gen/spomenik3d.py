@@ -246,30 +246,6 @@ def _normalize(mb: MB, height=1.0, max_radius=None):
 
 
 # ------------------------------------------------------------------ models ---
-def _shard(rng, cx, cz, rx, rz, h, lx, lz, n=6, twist=0.25, taper=(0.9, 0.62),
-           apex=(0.0, 0.0), chisel=0.0, xmin=None, xsign=1):
-    """Crystalline shard: lofted irregular polygon rings + pointed / chiselled top."""
-    base_ang = np.linspace(0, 2 * np.pi, n, endpoint=False) + rng.uniform(0, 2 * np.pi)
-    jit = rng.uniform(-0.28, 0.28, n) * (2 * np.pi / n)
-    rj = rng.uniform(0.82, 1.12, n)
-    pts = []
-    for fy, sc in ((0.0, 1.0), (0.48, taper[0]), (0.8, taper[1])):
-        y = fy * h
-        a = base_ang + jit + twist * fy
-        rj2 = rj * rng.uniform(0.92, 1.08, n)
-        x = cx + lx * fy + rx * sc * rj2 * np.cos(a)
-        z = cz + lz * fy + rz * sc * rj2 * np.sin(a)
-        if xmin is not None:
-            x = np.maximum(x, xmin) if xsign > 0 else np.minimum(x, -xmin)
-        pts += list(zip(x, np.full(n, y), z))
-    ax, az = cx + lx + apex[0], cz + lz + apex[1]
-    if chisel > 0:   # two top points -> chisel ridge
-        pts += [(ax - chisel * 0.5, h, az + chisel * 0.3), (ax + chisel * 0.5, h * 0.93, az - chisel * 0.3)]
-    else:
-        pts.append((ax, h, az))
-    return np.array(pts)
-
-
 def _fin(xc, t, z0, z1, h, zp, lean, gap, rng):
     """One slab 'finger' of a Tjentiste wing: thin in x, broad in z, gabled
     jagged top peaking at z=zp, leaning outwards (+x) with height."""
@@ -359,7 +335,7 @@ def _model_jasenovac():
     """Stone Flower: narrow waist flaring into an open bloom of scalloped petals,
     with an inner ring of petals. Open shells rendered two-sided."""
     mb = MB()
-    nu = 60
+    nu = 48
     th = np.linspace(0, 2 * np.pi, nu, endpoint=False)
     # outer profile control points (r, y)
     prof = np.array([(0.30, 0.00), (0.24, 0.05), (0.17, 0.13), (0.13, 0.22), (0.12, 0.30),
@@ -481,7 +457,7 @@ def _model_petrova_gora():
             rf = 0.66 * math.cos(ph)
             yf = 0.80 + 0.20 * math.sin(ph)
             sm = q * q
-        wave = 0.08 * math.sin(v * 6.0)
+        wave = 0.035 * math.sin(v * 5.0)
         fold = _tri(ribs * th / (2 * np.pi) + wave * ribs / (2 * np.pi))
         r = 0.26 * rf * lobe * (1 + 0.05 * fold)
         H_eff = Ht * (1 - 0.5 * sm) + Hm * 0.5 * sm
@@ -710,8 +686,8 @@ def render_model(t, dur, W, H, model="tjentiste", style="solid", yaw0=0.0, spin=
     by0 = int(math.floor(S[:, 1].min())) - pad
     bx1 = int(math.ceil(S[:, 0].max())) + pad
     by1 = int(math.ceil(S[:, 1].max())) + pad
-    bx0, by0 = max(bx0, -pad), max(by0, -pad)
-    bx1, by1 = min(bx1, W + pad), min(by1, H + pad)
+    bx0, by0 = max(bx0, 0), max(by0, 0)          # nothing off-frame is ever needed
+    bx1, by1 = min(bx1, W), min(by1, H)
     if bx1 - bx0 < 2 or by1 - by0 < 2:
         return np.zeros((H, W, 4), np.float32)
     cw, ch = (bx1 - bx0) * ss, (by1 - by0) * ss
@@ -776,7 +752,7 @@ def render_model(t, dur, W, H, model="tjentiste", style="solid", yaw0=0.0, spin=
         inside = flipn.astype(np.float64)
         ao = ao * (1 - 0.35 * inside)
         c = base * light * ao[:, None]
-        jit = np.where(mesh.mat == M_STEEL, 0.03, 0.10)
+        jit = np.where(mesh.mat == M_STEEL, 0.0, 0.10)
         c *= (1.0 + jit * (mesh.tone - 0.5))[:, None]
         shiny = np.isin(mesh.mat, (M_RED, M_GOLD, M_STEEL)).astype(np.float64)
         sp = spec ** 24 * (0.25 + 0.75 * shiny)
@@ -856,7 +832,7 @@ def render_model(t, dur, W, H, model="tjentiste", style="solid", yaw0=0.0, spin=
                 jit_rows.append((y0, hh, int(dx)))
         sweep = (t * 0.35) % 1.3 - 0.15
 
-        def post(img, bx, by):
+        def _holo_post(img, bx, by):
             w, h = img.size
             rows = np.arange(by, by + h)
             sl = np.where((rows // max(1, int(round(3 * px)))) % 2 == 0, 1.0, 0.55)
@@ -872,6 +848,7 @@ def render_model(t, dur, W, H, model="tjentiste", style="solid", yaw0=0.0, spin=
                     img.paste((0, 0, 0, 0), (0, r0, w, r1))
                     img.paste(band_im, (dx, r0))
             return img
+        post = _holo_post
     elif style == "xray":
         ec = _col(edge, PAL["cyan"])
         # faint body

@@ -63,7 +63,7 @@ FONT_FILES = {
 }
 
 _VAR_DEFAULTS = {"oswald": [700], "unbounded": [900], "serif": [900],
-                 "tektur": [100, 900], "noto": [100, 900]}
+                 "tektur": [100, 900], "noto": [700, 100]}
 
 
 @functools.lru_cache(maxsize=256)
