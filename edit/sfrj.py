@@ -109,7 +109,7 @@ def buildup(tl):
     cut(tl, B0 + 4, B0 + 6, count_item("5", "NARODA", nations_vis))
     cap(tl, B0 + 4, B0 + 6, "5 NATIONS", cy=0.95, cx=0.19)
     # 4 languages
-    langs = [("JEZIK", "SRPSKOHRVATSKI"), ("JEZIK", "SLOVENAČKI"), ("ЈАЗИК", "MAKEDONSKI"), ("GJUHA", "ALBANSKI")]
+    langs = [("ЈЕЗИК", "SRPSKI"), ("JEZIK", "HRVATSKI"), ("JEZIK", "SLOVENSKI"), ("ЈАЗИК", "MAKEDONSKI")]
 
     def lang_vis(c):
         img = np.zeros((c.H, c.W, 4), np.float32)
@@ -212,7 +212,7 @@ def dropA(tl):
     cut(tl, 50, 52, S_layers(S_photo(PH["tito_stern"], zoom=(1.2, 1.3), grade="bw", contrast=1.6),
                              T("NE.", "anton", 0.9, RED, 0.5, 0.5, s0=3.0, slam=0.1, stroke=0.006, stroke_color=BLACK)))
     fl(tl, 50, RED, 0.1)
-    cap(tl, 48, 52, "1948 · TITO SAYS NO TO STALIN")
+    cap(tl, 48, 52, "1948 · YUGOSLAVIA SAYS NO TO STALIN")
     cut(tl, 52, 56, S_layers(S_gen(g.europe_blocs, bg=BLACK),
                              T("IZMEĐU ISTOKA I ZAPADA", "anton", 0.1, WHITE, 0.5, 0.88, at=b(1), s0=1.5)))
     cap(tl, 52, 56, "NEITHER EAST NOR WEST", cy=0.96)
@@ -240,36 +240,45 @@ def dropA(tl):
                              T("OMLADINSKE", "anton", 0.2, WHITE, 0.5, 0.38, s0=1.8),
                              T("RADNE AKCIJE", "anton", 0.2, RED, 0.5, 0.62, at=BEAT, s0=1.8, stroke=0.004)))
     cut(tl, 66, 68, S_layers(S_photo(PH["brigade_b"], zoom=(1.3, 1.1), grade="gold", contrast=1.4),
-                             T("PRUGA BRČKO–BANOVIĆI", "anton", 0.12, WHITE, 0.5, 0.5, fit_w=0.9)))
-    cap(tl, 64, 68, "YOUTH BRIGADES BUILT RAILWAYS BY HAND")
+                             T("BRČKO–BANOVIĆI", "anton", 0.16, WHITE, 0.5, 0.42, fit_w=0.9),
+                             T("92 KM", "anton", 0.2, GOLD, 0.5, 0.64, at=BEAT, s0=2.0)))
+    cap(tl, 64, 66, "YOUTH BRIGADES BUILT THE RAILWAYS")
+    cap(tl, 66, 68, "1946 · 62,000 YOUNG VOLUNTEERS")
     cut(tl, 68, 72, S_layers(S_gen(el.highway, bg=BLACK, speed=1.6),
                              T("AUTOPUT", "anton", 0.22, WHITE, 0.5, 0.2, s0=2.0),
                              T("BRATSTVO I JEDINSTVO", "anton", 0.12, GOLD, 0.5, 0.36, at=BEAT, s0=1.6)))
-    cap(tl, 68, 72, "THE BROTHERHOOD AND UNITY HIGHWAY")
+    cap(tl, 68, 72, "ZAGREB–BELGRADE · 382 KM · 1948–50")
     # --- growth + literacy
     cut(tl, 72, 76, S_layers(S_solid(NAVY),
-        lambda c, img: over(img, el.bar_chart(c.lt, c.dur, c.W, c.H, values=(100, 170, 290, 460),
-                                              labels=("1950", "1960", "1970", "1980"), hits=[0, BEAT, BEAT * 2, BEAT * 3])),
-        T("RAST", "anton", 0.16, GOLD, 0.2, 0.18, s0=1.6)))
-    cap(tl, 72, 76, "DECADES OF RAPID GROWTH")
-    cut(tl, 76, 80, S_layers(S_photo(PH["school"], zoom=(1.0, 1.2), grade="blue", contrast=1.3),
-                             T("PISMENOST", "anton", 0.22, WHITE, 0.5, 0.4, s0=1.6),
-                             lambda c, img: T(f"{int(55 + 35 * ease_out_cubic(c.p))}%", "anton", 0.26, GOLD, 0.5, 0.68,
-                                              slam=0)(c, img)))
-    cap(tl, 76, 80, "LITERACY FOR ALL")
+        lambda c, img: over(img, el.bar_chart(c.lt, c.dur, c.W, c.H, values=(9.5, 6.6, 6.1),
+                                              labels=("1953–59", "1960–69", "1970–79"),
+                                              hits=[BEAT, BEAT * 2, BEAT * 3], unit="%", decimals=1)),
+        T("RAST", "anton", 0.16, GOLD, 0.2, 0.16, s0=1.6),
+        T("~6% GODIŠNJE", "anton", 0.09, WHITE, 0.2, 0.28, at=BEAT * 0.5, s0=1.6)))
+    cap(tl, 72, 76, "~6% GROWTH A YEAR, 1953–79")
+    cut(tl, 76, 78, S_layers(S_photo(PH["school"], zoom=(1.0, 1.2), grade="blue", contrast=1.3),
+                             T("NEPISMENOST", "anton", 0.2, WHITE, 0.5, 0.36, s0=1.6),
+                             lambda c, img: T(f"{25 - 15.5 * ease_out_cubic(min(c.p * 1.3, 1)):.1f}%".replace(".", ","),
+                                              "anton", 0.3, GOLD, 0.5, 0.66, slam=0)(c, img)))
+    cap(tl, 76, 78, "ILLITERACY · 1948: 25% → 1981: 9.5%")
+    cut(tl, 78, 80, S_layers(S_photo(PH["crowd_b"], zoom=(1.2, 1.05), grade="gold", contrast=1.3),
+                             T("ŽIVOTNI VEK", "anton", 0.2, WHITE, 0.5, 0.36, s0=1.6),
+                             lambda c, img: T(f"{50 + 20 * ease_out_cubic(min(c.p * 1.3, 1)):.0f}", "anton", 0.3, GOLD,
+                                              0.5, 0.66, slam=0)(c, img)))
+    cap(tl, 78, 80, "LIFE EXPECTANCY · ~50 → ~70 YEARS")
 
     # --- passport
     stamps = [(b(3) + k * BEAT / 2, lab) for k, lab in
-              enumerate(["NEW YORK", "MOSKVA", "PARIS", "KAIRO", "LONDON", "NEW DELHI"])]
+              enumerate(["PARIS", "MOSKVA", "ROMA", "PRAHA", "BEČ", "VARŠAVA"])]
     cut(tl, 80, 86, S_layers(S_gen(g.passport, bg=DRED, open_at=b(1.5), stamps=stamps),
                              T("CRVENI PASOŠ", "anton", 0.12, WHITE, 0.5, 0.1, s0=1.5)))
-    cap(tl, 80, 86, "VISA-FREE TO EAST AND WEST")
+    cap(tl, 80, 86, "VISA-FREE TO MOST OF EAST AND WEST")
     # --- NAM
     cut(tl, 86, 87, S_photo(PH["nam_a"], zoom=(1.2, 1.3), grade="gold", contrast=1.4))
     cut(tl, 87, 88, S_photo(PH["nam_b"], zoom=(1.3, 1.2), grade="bw", contrast=1.4))
     cut(tl, 88, 94, S_layers(S_gen(g.world_nam, bg=BLACK),
                              T("NESVRSTANI", "anton", 0.14, GOLD, 0.5, 0.12, at=0, s0=1.6),
-                             T("BEOGRAD 1961", "mono", 0.05, WHITE, 0.5, 0.22, at=BEAT, s0=1.2)))
+                             T("BEOGRAD 1961 · 25 ZEMALJA", "mono", 0.05, WHITE, 0.5, 0.22, at=BEAT, s0=1.2)))
     cap(tl, 86, 94, "1961 · THE NON-ALIGNED MOVEMENT IS BORN IN BELGRADE")
     # --- 16th blitz into the break
     blitz = [PH[k] for k in ("tito_hero", "partisans_a", "brigade_a", "nam_a", "industry_a", "partisans_b",
@@ -294,13 +303,13 @@ def brk(tl):
     cap(tl, 100, 104, "TJENTIŠTE · SUTJESKA")
     cut(tl, 104, 108, S_layers(S_photo(PH["funeral"], zoom=(1.0, 1.15), grade="bw", contrast=1.3),
                                T("4. MAJ 1980.", "mono", 0.06, WHITE, 0.5, 0.2, slam=0),
-                               lambda c, img: T(f"{int(128 * ease_out_cubic(min(c.p * 1.4, 1)))}", "anton", 0.4, WHITE,
-                                                0.5, 0.52, slam=0)(c, img),
+                               lambda c, img: T(f"{int(120 * ease_out_cubic(min(c.p * 1.4, 1)))}" + ("+" if c.p > 0.72 else ""),
+                                                "anton", 0.4, WHITE, 0.5, 0.52, slam=0)(c, img),
                                T("ZEMALJA", "anton", 0.1, RED, 0.5, 0.78, slam=0)))
-    cap(tl, 104, 108, "128 COUNTRIES CAME TO SAY GOODBYE", cy=0.93)
+    cap(tl, 104, 108, "TITO'S FUNERAL · 120+ COUNTRIES", cy=0.93)
     cut(tl, 108, 111, S_layers(S_solid(DRED), T_type("DRUŽE TITO,", "anton", 0.13, WHITE, 0.5, 0.4, cps=12),
                                T_type("MI TI SE KUNEMO", "anton", 0.13, WHITE, 0.5, 0.6, cps=16, at=BEAT * 1.2)))
-    cap(tl, 108, 111, "COMRADE TITO, WE PLEDGE TO YOU")
+    cap(tl, 108, 111, "COMRADE TITO, WE SWEAR TO YOU")
     cut(tl, 111, 112, S_solid(BLACK))
     tl.op(b(96), b(111), O_camera(punch=0.0, shake=3, rgb=0, drift=5), z=40)
     # flicker increases towards the drop
@@ -320,7 +329,8 @@ def dropB(tl):
                                T("SARAJEVO '84", "anton", 0.22, WHITE, 0.5, 0.82, s0=1.8)))
     cut(tl, 118, 120, S_layers(S_photo(PH["sport_a"], zoom=(1.1, 1.3), grade="blue", contrast=1.3),
                                T("XIV ZIMSKE OLIMPIJSKE IGRE", "anton", 0.09, WHITE, 0.5, 0.85, fit_w=0.9)))
-    cap(tl, 116, 120, "1984 · THE WINTER OLYMPICS COME TO SARAJEVO")
+    cap(tl, 116, 118, "1984 · XIV WINTER OLYMPICS")
+    cap(tl, 118, 120, "FIRST WINTER GAMES IN A SOCIALIST COUNTRY")
     # basketball
     def bball(c):
         img = blank(c.W, c.H, (0.9, 0.35, 0.05))
@@ -329,15 +339,15 @@ def dropB(tl):
             if c.lt >= BEAT * (k + 1):
                 T(yr, "anton", 0.3, WHITE, 0.22 + 0.28 * k, 0.5, at=BEAT * (k + 1), s0=2.2, stroke=0.005)(c, img)
         return img
-    cut(tl, 120, 124, S_layers(bball, T("SVETSKI PRVACI", "anton", 0.15, BLACK, 0.5, 0.15, s0=1.5)))
+    cut(tl, 120, 124, S_layers(bball, T("PRVACI SVETA", "anton", 0.15, BLACK, 0.5, 0.15, s0=1.5)))
     cap(tl, 120, 124, "BASKETBALL WORLD CHAMPIONS")
     cut(tl, 124, 126, S_layers(S_photo(PH["sport_b"], zoom=(1.2, 1.35), grade="red", contrast=1.4),
-                               T("ČILE 1987", "anton", 0.3, WHITE, 0.5, 0.5, s0=2)))
-    cap(tl, 124, 126, "1987 · YOUTH WORLD CHAMPIONS")
+                               T("ČILE '87", "anton", 0.3, WHITE, 0.5, 0.45, s0=2), T("PRVACI SVETA", "anton", 0.11, GOLD, 0.5, 0.7, at=BEAT, s0=1.6)))
+    cap(tl, 124, 126, "1987 · U-20 WORLD CHAMPIONS")
     cut(tl, 126, 128, S_layers(S_gen(g.vinyl, bg=BLACK, label="JUGOTON"),
                                T("ROCK ME", "anton", 0.3, WHITE, 0.5, 0.5, s0=2.5, glow=RED),
                                T("EUROVIZIJA 1989", "mono", 0.05, GOLD, 0.5, 0.75)))
-    cap(tl, 126, 128, "1989 · YUGOSLAVIA WINS EUROVISION")
+    cap(tl, 126, 128, "1989 · RIVA WINS EUROVISION")
     # new wave — names at 8ths with colour cycling
     bands = ["BIJELO DUGME", "AZRA", "EKV", "IDOLI", "RIBLJA ČORBA", "ŠARLO AKROBATA", "LAIBACH", "HAUSTOR",
              "PARNI VALJAK", "FILM", "ZABRANJENO PUŠENJE", "PRLJAVO KAZALIŠTE", "DISCIPLINA KIČME", "ELEKTRIČNI ORGAZAM",
@@ -390,8 +400,10 @@ def dropB(tl):
     # --- Fićo drift
     cut(tl, 152, 160, S_layers(S_gen(g.fico_drift, bg=(0.1, 0.1, 0.11)),
                                T("FIĆO", "anton", 0.3, WHITE, 0.18, 0.18, s0=2.4, stroke=0.005),
-                               T("ZASTAVA 750", "mono", 0.045, GOLD, 0.18, 0.33, at=BEAT)))
-    cap(tl, 152, 160, "THE PEOPLE'S CAR")
+                               T("ZASTAVA 750", "mono", 0.045, GOLD, 0.18, 0.33, at=BEAT),
+                               T("923.487", "anton", 0.12, GOLD, 0.82, 0.18, at=BEAT * 4, s0=2.0)))
+    cap(tl, 152, 156, "ZASTAVA 750 · 1955–85")
+    cap(tl, 156, 160, "923,487 PEOPLE'S CARS BUILT")
 
     # --- finale: recap at 8ths
     rec = ["tito_hero", "partisans_a", "brigade_a", "nam_a", "spomenik_a", "industry_a", "liberation", "arch_a",

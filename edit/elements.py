@@ -85,7 +85,7 @@ def highway(t, dur, W, H, speed=1.0, horizon=0.42, color=RED, glow=True, km=None
 
 # --------------------------------------------------------- bar chart --------
 def bar_chart(t, dur, W, H, values=(20, 45, 70, 100), labels=("1950", "1960", "1970", "1980"),
-              color=RED, hits=None, title=None, unit=""):
+              color=RED, hits=None, title=None, unit="", decimals=0):
     """Bars shoot up one by one (at `hits` local times) with value labels."""
     im = Image.new("RGBA", (W, H), (0, 0, 0, 0))
     d = ImageDraw.Draw(im)
@@ -105,7 +105,7 @@ def bar_chart(t, dur, W, H, values=(20, 45, 70, 100), labels=("1950", "1960", "1
         if p > 0:
             d.rectangle([x, base_y - h, x + bw, base_y], fill=_c8(color))
             d.rectangle([x, base_y - h, x + bw, base_y - h + max(3, H * 0.006)], fill=_c8(GOLD))
-            vs = f"{v * p:.0f}{unit}"
+            vs = f"{v * p:.{decimals}f}{unit}".replace(".", ",") if decimals else f"{v * p:.0f}{unit}"
             tw = d.textlength(vs, font=f_val)
             d.text((x + bw / 2 - tw / 2, base_y - h - H * 0.1), vs, font=f_val, fill=_c8(WHITE))
         tw = d.textlength(lab, font=f_lab)
