@@ -378,10 +378,12 @@ def T_type(text, fname="mono", size=0.06, color=WHITE, cx=0.5, cy=0.5, cps=16, a
         if lt < 0:
             return img
         s = tx.typewriter(text, lt, cps, cursor)
+        if fname != "mono":
+            s = s.replace("█", "_")
         if not s:
             return img
         L = _L(s, fname, int(size * c.H), color, tracking)
-        full = _L(text + "█", fname, int(size * c.H), color, tracking)
+        full = _L(text + ("█" if fname == "mono" else "_"), fname, int(size * c.H), color, tracking)
         x0 = cx - full.shape[1] / c.W / 2
         tx.place(img, L, x0, cy, anchor="l")
         return img
@@ -608,4 +610,26 @@ def S_mosaic(names, cols=4, rows=3, fill_dur=None, grades=("bw", "red", "blue", 
                 ph = fx.flash(ph, WHITE, 0.6)
             img[j * ch:(j + 1) * ch, i * cw:(i + 1) * cw] = ph
         return img
+    return f
+
+
+def S_band(name, grade=None, contrast=1.3, zoom=(1.0, 1.08), bg_grade="blue", blur_r=30):
+    """Wide panorama shown as a full-width band over a blurred, darkened cover of itself."""
+    def f(c):
+        H, W = c.H, c.W
+        bg = _photo_or_placeholder(name, W, H, c.p, zoom=(1.0, 1.0))
+        bg = fx.blur_fast(bg, blur_r * W / 1920, 4)
+        bg = fx.grade(bg, bg_grade, 1.0) * 0.45
+        im = media.load(name)
+        z = zoom[0] + (zoom[1] - zoom[0]) * c.p
+        bw = int(W * z)
+        bh = int(im.height * bw / im.width)
+        band = from_pil(im.resize((bw, bh), Image.BICUBIC))
+        if grade:
+            band = fx.grade(band, grade, contrast)
+        x0 = (W - bw) // 2
+        y0 = (H - bh) // 2
+        xs0, xs1 = max(0, -x0), min(bw, W - x0)
+        bg[max(y0, 0):y0 + bh, max(x0, 0):max(x0, 0) + (xs1 - xs0)] = band[max(0, -y0):max(0, -y0) + min(bh, H), xs0:xs1]
+        return bg
     return f

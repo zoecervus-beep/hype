@@ -91,7 +91,7 @@ def bar_chart(t, dur, W, H, values=(20, 45, 70, 100), labels=("1950", "1960", "1
     d = ImageDraw.Draw(im)
     n = len(values)
     hits = hits or [dur * 0.15 * (k + 1) for k in range(n)]
-    base_y = H * 0.82
+    base_y = H * 0.84
     bw = W * 0.12
     gap = W * 0.05
     x0 = W / 2 - (n * bw + (n - 1) * gap) / 2
@@ -100,7 +100,7 @@ def bar_chart(t, dur, W, H, values=(20, 45, 70, 100), labels=("1950", "1960", "1
     f_val = font("anton", int(H * 0.08))
     for k, (v, lab) in enumerate(zip(values, labels)):
         p = ease_out_expo(max(0, min((t - hits[k]) / 0.25, 1)))
-        h = (H * 0.55) * v / vmax * p
+        h = (H * 0.46) * v / vmax * p
         x = x0 + k * (bw + gap)
         if p > 0:
             d.rectangle([x, base_y - h, x + bw, base_y], fill=_c8(color))
@@ -255,4 +255,67 @@ def film_burn(t, dur, W, H, seed=1):
     out[..., 1] = 0.35 + 0.6 * a
     out[..., 2] = 0.1 + 0.8 * a ** 3
     out[..., 3] = np.clip(a * 1.3, 0, 1)
+    return out
+
+
+# ------------------------------------------------------------- railway ------
+def railway(t, dur, W, H, speed=1.0, horizon=0.4, rail=(0.85, 0.85, 0.9), sky=True):
+    """Railway track rushing toward camera: sleepers + two rails, sunrise sky, distance ticks."""
+    im = Image.new("RGBA", (W, H), _c8((0.02, 0.02, 0.03)))
+    d = ImageDraw.Draw(im)
+    hy = int(H * horizon)
+    if sky:
+        g = np.linspace(0, 1, hy, dtype=np.float32)[:, None]
+        skyc = np.zeros((hy, W, 4), np.float32)
+        skyc[..., 0] = 0.05 + 0.75 * g ** 2.5
+        skyc[..., 1] = 0.02 + 0.22 * g ** 3
+        skyc[..., 2] = 0.06 + 0.05 * g
+        skyc[..., 3] = 1
+        im.paste(Image.fromarray((skyc * 255).astype(np.uint8), "RGBA"), (0, 0))
+        # rising sun
+        r = H * 0.2
+        d.ellipse([W / 2 - r, hy - r * 0.55, W / 2 + r, hy + r * 1.45], fill=_c8((1.0, 0.55, 0.15)))
+        d.rectangle([0, hy, W, H], fill=_c8((0.05, 0.03, 0.03)))
+    vx = W / 2
+    gauge = W * 0.55
+    # sleepers
+    n = 28
+    ph = (t * speed * 3.0) % 1.0
+    for k in range(n, -1, -1):
+        z = min((k + 1 - ph) / n, 1.0)
+        y = hy + (H - hy) * (1 - z) ** 2.6
+        if y <= hy + 1:
+            continue
+        half = gauge * 0.62 * (1 - z) ** 2.6 + 2
+        th = max(1.0, 28 * (1 - z) ** 2.6 * H / 1080)
+        shade = int(60 + 60 * (1 - z))
+        d.polygon([(vx - half, y), (vx + half, y), (vx + half * 1.02, y + th), (vx - half * 1.02, y + th)],
+                  fill=(shade + 30, shade, shade - 20, 255))
+    # rails
+    for side in (-1, 1):
+        for off, col in ((0, rail), (6, (0.45, 0.45, 0.5))):
+            d.line([(vx + side * 3, hy), (vx + side * (gauge / 2 + off * W / 1920), H)], fill=_c8(col),
+                   width=max(2, int(W / 300)))
+    out = _rgba(im)
+    return out
+
+
+# ------------------------------------------------------------ alphabet ------
+AZBUKA = "АБВГДЂЕЖЗИЈКЛЉМНЊОПРСТЋУФХЦЧЏШ"
+ABECEDA = "ABCČĆDDŽĐEFGHIJKLLJMNNJOPRSŠTUVZŽ"
+
+
+def alphabet_wall(t, dur, W, H, speed=1.0, color=(1, 1, 1), alpha=0.18, rows=5):
+    """Scrolling rows of Latin and Cyrillic letters (literacy backdrop)."""
+    out = np.zeros((H, W, 4), np.float32)
+    for r in range(rows):
+        s = (ABECEDA if r % 2 == 0 else AZBUKA) * 3
+        L = tx.text_layer(" ".join(s), "russo", int(H / rows * 0.8), color)
+        h, w = L.shape[:2]
+        period = w / 3
+        dirn = 1 if r % 2 == 0 else -1
+        x = int(-period + dirn * ((t * speed * W * 0.25 + r * 137) % period))
+        y = int(r * H / rows + (H / rows - h) / 2)
+        _blit(out, L, x, y)
+    out[..., 3] *= alpha
     return out

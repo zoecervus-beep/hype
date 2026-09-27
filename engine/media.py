@@ -7,7 +7,7 @@ import math
 import os
 
 import numpy as np
-from PIL import Image, ImageOps
+from PIL import Image, ImageFilter, ImageOps
 
 from .core import ASSETS, from_pil
 
@@ -35,12 +35,18 @@ def path_for(name):
 
 
 @functools.lru_cache(maxsize=48)
-def load(name, max_side=2400):
+def load(name, max_side=2400, min_side=1600):
+    """Load once per process. Small archive scans get a Lanczos upscale + unsharp mask so
+    later per-frame resampling starts from a crisper source."""
     im = Image.open(path_for(name))
     im = ImageOps.exif_transpose(im).convert("RGB")
     if max(im.size) > max_side:
         s = max_side / max(im.size)
         im = im.resize((int(im.width * s), int(im.height * s)), Image.LANCZOS)
+    elif max(im.size) < min_side:
+        s = min_side / max(im.size)
+        im = im.resize((int(im.width * s), int(im.height * s)), Image.LANCZOS)
+        im = im.filter(ImageFilter.UnsharpMask(radius=2.2, percent=90, threshold=2))
     return im
 
 
