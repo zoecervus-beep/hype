@@ -80,6 +80,8 @@ def beat_repeat(x, regions):
             reps = int(np.ceil((e - s) / L))
             tile = np.concatenate([seg * (1 - 0.03 * r) for r in range(reps)])[: e - s]
             y[s:e] = tile
+        e = int(round(T(b1) * SR))                # fade the dry signal back in after the region
+        y[e:e + fl] *= np.linspace(0, 1, fl)[:, None]
     return y
 
 

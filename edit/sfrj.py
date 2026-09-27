@@ -308,7 +308,7 @@ def dropA(tl):
 
 # ====================================================================== BREAK
 def brk(tl):
-    cut(tl, 96, 100, S_layers(S_gen(g.render_model, bg=(0.03, 0.03, 0.04), model="tjentiste", style="solid", spin=0.35),
+    cut(tl, 96, 100, S_layers(S_gen(g.render_model, bg=(0.03, 0.03, 0.04), model="tjentiste", style="solid", spin=0.35, zoom=0.82, cy=0.64, pitch=0.12),
                               T("SPOMENICI", "serif", 0.11, WHITE, 0.5, 0.2, s0=1.0, slam=0.6, tracking=0.3)))
     fl(tl, 96, WHITE, 0.25)
     cap(tl, 96, 100, "MONUMENTS TO THE FALLEN")

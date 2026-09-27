@@ -95,8 +95,9 @@ def main():
     print(f"  final: lufs={info['lufs']:.2f} tp={info['tp']:.2f} dBTP gain={info['gain_db']:+.2f} dB")
     write_wav(os.path.join(OUT, "track.wav"), y)
     g = 10 ** (info["gain_db"] / 20)
-    for k, x in stems.items():
-        write_wav(os.path.join(OUT, "stems", f"{k}.wav"), apply_gates(x * g * 0.5, gaps_s, FADE_OUT))
+    stems = {k: apply_gates(x[:N] * g * 0.5, gaps_s, FADE_OUT) for k, x in stems.items()}
+    for k, x in stems.items():   # stems at -6 dB relative to the master's pre-gain (headroom)
+        write_wav(os.path.join(OUT, "stems", f"{k}.wav"), x)
     bm = beatmap(ev, y, stems)
     with open(os.path.join(OUT, "beatmap.json"), "w") as f:
         json.dump(bm, f, separators=(",", ":"))
