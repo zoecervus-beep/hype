@@ -107,8 +107,8 @@ def bass_line(events, n, glide_time=0.07, drive_amt=3.0, clip=0.8, dist_lp=2600)
     prev, last_lvl = None, 0.8
     evs = sorted(events, key=lambda e: e["t"])
     for i, ev in enumerate(evs):
-        s, d = _n(ev["t"]), _n(ev["dur"])
-        e = min(n, s + d)
+        s = _n(ev["t"])
+        e = min(n, _n(ev["t"] + ev["dur"]))
         if s >= n:
             continue
         L = e - s

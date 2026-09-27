@@ -8,3 +8,4 @@ out/*.mp4
 *.whl
 out/audio/stems/
 out/preview_half.mp4
+out/audio/
