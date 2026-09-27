@@ -26,7 +26,7 @@ import sys
 import time
 
 import numpy as np
-from PIL import Image, ImageDraw, ImageFilter
+from PIL import Image, ImageChops, ImageDraw, ImageFilter
 from scipy.spatial import ConvexHull
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -46,7 +46,7 @@ M_CONCRETE, M_GLASS, M_RED, M_GOLD, M_STEEL, M_INNER = range(6)
 class Mesh:
     """Polygon mesh: vertices (N,3), faces padded to (F,K) + counts, per-face data."""
 
-    def __init__(self, V, faces, mats, two, name=""):
+    def __init__(self, V, faces, mats, two, name="", segs=None, crease=14.0):
         self.name = name
         self.V = np.asarray(V, np.float64)
         F = len(faces)
@@ -73,13 +73,57 @@ class Mesh:
         self.N = n / np.maximum(ln, 1e-12)
         w = (np.arange(K)[None, :] < cnt[:, None]).astype(np.float64)
         self.C = (P * w[..., None]).sum(1) / cnt[:, None]
-        # unique undirected edges
-        es = set()
-        for f in faces:
+        # ---- drawable edges: explicit per-face segments (grids) or feature edges
+        segs = segs if segs is not None else [None] * F
+        adj = {}
+        for fi, f in enumerate(faces):
             for a, b in zip(f, f[1:] + f[:1]):
-                if a != b:
+                adj.setdefault((min(a, b), max(a, b)), []).append(fi)
+        cth = math.cos(math.radians(crease))
+        runs, es = [], set()
+        for fi, f in enumerate(faces):
+            n = len(f)
+            if segs[fi] is not None:
+                hard = [((min(a, b), max(a, b)) in segs[fi]) for a, b in zip(f, f[1:] + f[:1])]
+            else:
+                hard = []
+                for a, b in zip(f, f[1:] + f[:1]):
+                    fs = adj[(min(a, b), max(a, b))]
+                    if len(fs) != 2:
+                        hard.append(True)
+                    else:
+                        g = fs[0] if fs[1] == fi else fs[1]
+                        hard.append(bool(np.dot(self.N[fi], self.N[g]) < cth or mats[fi] != mats[g]))
+            for k in range(n):
+                if hard[k]:
+                    a, b = f[k], f[(k + 1) % n]
                     es.add((min(a, b), max(a, b)))
-        self.edges = np.array(sorted(es), np.int64)
+            if all(hard):
+                runs.append([f + f[:1]])
+                continue
+            fr = []
+            if any(hard):
+                k0 = hard.index(False) + 1
+                cur = []
+                for s_ in range(n):
+                    k = (k0 + s_) % n
+                    if hard[k]:
+                        if not cur:
+                            cur = [f[k]]
+                        cur.append(f[(k + 1) % n])
+                    elif cur:
+                        fr.append(cur)
+                        cur = []
+                if cur:
+                    fr.append(cur)
+            runs.append(fr)
+        self.runs = runs
+        self.edges = np.array(sorted(es), np.int64).reshape(-1, 2)
+        # all polygon edges with their (one or two) adjacent faces, for silhouettes
+        ks = sorted(adj)
+        self.all_edges = np.array(ks, np.int64).reshape(-1, 2)
+        self.edge_faces = np.array([(adj[k][0], adj[k][1] if len(adj[k]) > 1 else -1) for k in ks],
+                                   np.int64).reshape(-1, 2)
         # deterministic per-face tone jitter
         self.tone = (np.sin(np.arange(F) * 12.9898 + 78.233) * 43758.5453) % 1.0
         # polygon index lists for the draw loop
@@ -91,14 +135,14 @@ class MB:
     """Mesh builder."""
 
     def __init__(self):
-        self.V, self.F, self.M, self.T = [], [], [], []
+        self.V, self.F, self.M, self.T, self.S = [], [], [], [], []
 
     def verts(self, pts):
         base = len(self.V)
         self.V.extend([tuple(map(float, p)) for p in pts])
         return list(range(base, base + len(pts)))
 
-    def face(self, idx, mat=M_CONCRETE, two=False):
+    def face(self, idx, mat=M_CONCRETE, two=False, segs=None):
         # drop consecutive duplicates
         out = []
         for i in idx:
@@ -110,6 +154,7 @@ class MB:
             self.F.append(out)
             self.M.append(mat)
             self.T.append(two)
+            self.S.append(segs)
 
     def hull(self, pts, mat=M_CONCRETE, mats_fn=None):
         """Add the convex hull of pts, merging coplanar triangles into polygons."""
@@ -144,29 +189,46 @@ class MB:
             m = mats_fn(n, c) if mats_fn else mat
             self.face(gi, m)
 
-    def grid(self, P, mat=M_CONCRETE, wrap=True, two=False, flip=False):
+    def grid(self, P, mat=M_CONCRETE, wrap=True, two=False, flip=False, ku=1, kv=1):
         """Quad-strip surface. P: (nv, nu, 3), rows bottom->top, u = angle (CCW
-        seen from above for surfaces of revolution). Returns index grid."""
+        seen from above for surfaces of revolution). Wireframe draws every ku-th
+        column line and every kv-th row line (+ first/last rows). Returns index grid."""
         nv, nu = P.shape[:2]
         ids = np.array(self.verts(P.reshape(-1, 3))).reshape(nv, nu)
+
+        def e(a, b):
+            return (min(a, b), max(a, b))
         for i in range(nv - 1):
             for j in range(nu if wrap else nu - 1):
                 j1 = (j + 1) % nu
-                q = [ids[i, j], ids[i + 1, j], ids[i + 1, j1], ids[i, j1]]
+                a, d, c, b = ids[i, j], ids[i + 1, j], ids[i + 1, j1], ids[i, j1]
+                sg = set()
+                if j % ku == 0 or (not wrap and j == 0):
+                    sg.add(e(a, d))
+                if j1 % ku == 0 or (not wrap and j1 == nu - 1):
+                    sg.add(e(b, c))
+                if (i + 1) % kv == 0 or i + 1 == nv - 1:
+                    sg.add(e(d, c))
+                if i % kv == 0:
+                    sg.add(e(a, b))
+                q = [a, d, c, b]
                 if flip:
                     q = q[::-1]
-                self.face(q, mat, two)
+                self.face(q, mat, two, segs=sg)
         return ids
 
-    def fan(self, ring_ids, center, mat=M_CONCRETE, up=True, two=False):
+    def fan(self, ring_ids, center, mat=M_CONCRETE, up=True, two=False, k=4):
         c = self.verts([center])[0]
         n = len(ring_ids)
         for j in range(n):
             a, b = ring_ids[j], ring_ids[(j + 1) % n]
-            self.face([c, b, a] if up else [c, a, b], mat, two)
+            sg = {(min(a, b), max(a, b))}
+            if j % k == 0:
+                sg.add((min(a, c), max(a, c)))
+            self.face([c, b, a] if up else [c, a, b], mat, two, segs=sg)
 
     def build(self, name=""):
-        return Mesh(self.V, self.F, self.M, self.T, name)
+        return Mesh(self.V, self.F, self.M, self.T, name, segs=self.S)
 
 
 def _normalize(mb: MB, height=1.0, max_radius=None):
@@ -208,41 +270,53 @@ def _shard(rng, cx, cz, rx, rz, h, lx, lz, n=6, twist=0.25, taper=(0.9, 0.62),
     return np.array(pts)
 
 
+def _fin(xc, t, z0, z1, h, zp, lean, gap, rng):
+    """One slab 'finger' of a Tjentiste wing: thin in x, broad in z, gabled
+    jagged top peaking at z=zp, leaning outwards (+x) with height."""
+    j = lambda a: a * (1 + rng.uniform(-0.12, 0.12))  # noqa: E731
+    pts = []
+    L = z1 - z0
+    for (dx, z) in ((-0.5, z0 + 0.10 * L), (0.5, z0 + 0.06 * L), (0.0, z0),
+                    (0.5, z1 - 0.08 * L), (-0.5, z1 - 0.12 * L), (0.0, z1)):
+        pts.append((xc + dx * j(t), 0.0, z))
+    # shoulder ring
+    f = 0.5
+    for (dx, z, hy) in ((-0.5, z0 + 0.14 * L, 0.52), (0.5, z0 + 0.10 * L, 0.58),
+                        (0.5, z1 - 0.12 * L, 0.46), (-0.5, z1 - 0.16 * L, 0.50)):
+        pts.append((xc + dx * j(t) * 0.9 + lean * f, j(hy) * h, z))
+    # upper ridge towards the peak
+    pts.append((xc + lean * 0.8 - 0.3 * t, 0.80 * h, zp - 0.16 * L))
+    pts.append((xc + lean * 0.8 + 0.3 * t, 0.74 * h, zp + 0.14 * L))
+    pts.append((xc + lean - 0.25 * t, h, zp - 0.02 * L))
+    pts.append((xc + lean + 0.25 * t, 0.96 * h, zp + 0.05 * L))
+    P = np.array(pts)
+    P[:, 0] = np.maximum(P[:, 0], gap)
+    return P
+
+
 def _model_tjentiste():
-    """Sutjeska memorial: two mirrored massive faceted rock-like wings with a narrow
-    passage between them; each wing is a heavy base mass whose top splits into
-    jagged slab-like fingers, tallest next to the passage."""
+    """Sutjeska memorial: two mirrored massive faceted rock-like wings with a
+    narrow passage between them. Each wing is a stack of broad slabs ("fingers")
+    parallel to the passage: tallest at the passage, lower and leaning outwards
+    further out, with gabled jagged tops."""
     mb = MB()
-    gap = 0.05
-    parts = []
-    # heavy lower masses (sloping down away from the passage)
-    parts.append(np.array([
-        (gap, 0, -0.36), (gap, 0, 0.36), (0.20, 0, 0.44), (0.40, 0, 0.18), (0.42, 0, -0.14), (0.22, 0, -0.44),
-        (gap, 0.60, -0.20), (gap, 0.66, 0.16), (0.13, 0.52, 0.30), (0.27, 0.30, 0.12), (0.26, 0.34, -0.22),
-        (0.12, 0.48, -0.32)]))
-    parts.append(np.array([
-        (0.20, 0, -0.10), (0.20, 0, 0.30), (0.50, 0, 0.14), (0.48, 0, -0.08),
-        (0.26, 0.40, 0.04), (0.25, 0.36, 0.22), (0.40, 0.16, 0.10), (0.39, 0.18, -0.02)]))
-    # slab fingers: (cx, cz, rx, rz, y0, h, lean_x, lean_z, apex_dx, apex_dz, chisel)
-    spec = [
-        (0.10, 0.02, 0.060, 0.17, 0.30, 1.00, 0.07, 0.03, 0.02, 0.06, 0.07),
-        (0.10, -0.20, 0.055, 0.12, 0.25, 0.86, 0.07, -0.06, 0.02, -0.03, 0.05),
-        (0.10, 0.25, 0.055, 0.10, 0.25, 0.92, 0.06, 0.07, 0.00, 0.04, 0.0),
-        (0.19, 0.10, 0.060, 0.12, 0.25, 0.80, 0.10, 0.04, 0.03, 0.02, 0.06),
-        (0.20, -0.10, 0.065, 0.13, 0.20, 0.70, 0.11, -0.03, 0.02, -0.02, 0.0),
-        (0.28, 0.18, 0.060, 0.10, 0.10, 0.56, 0.12, 0.05, 0.03, 0.0, 0.05),
-        (0.29, -0.22, 0.060, 0.10, 0.10, 0.48, 0.12, -0.05, 0.0, -0.02, 0.0),
+    gap = 0.045
+    # (x centre, thickness, z0, z1, height, peak z, lean)
+    fins = [
+        (0.095, 0.110, -0.36, 0.34, 1.00, 0.02, 0.04),
+        (0.175, 0.115, -0.40, 0.30, 0.85, -0.14, 0.06),
+        (0.255, 0.115, -0.30, 0.40, 0.70, 0.16, 0.07),
+        (0.330, 0.110, -0.36, 0.26, 0.54, -0.06, 0.08),
+        (0.400, 0.100, -0.26, 0.26, 0.38, 0.08, 0.07),
+        (0.455, 0.080, -0.16, 0.14, 0.24, -0.02, 0.05),
     ]
     rng = np.random.default_rng(1971)
-    for (cx, cz, rx, rz, y0, h, lx, lz, ax, az, ch) in spec:
-        P = _shard(rng, cx, cz, rx, rz, h - y0, lx, lz, n=5, twist=0.15, taper=(0.97, 0.85),
-                   apex=(ax, az), chisel=ch, xmin=gap)
-        P[:, 1] += y0
-        parts.append(P)
-    for P in parts:
+    for (xc, t, z0, z1, h, zp, lean) in fins:
+        P = _fin(xc, t, z0, z1, h, zp, lean, gap, rng)
         mb.hull(P)
         Q = P.copy()
         Q[:, 0] *= -1
+        Q[:, 2] *= -1          # point-mirror so the two wings are not identical
         mb.hull(Q)
     return _normalize(mb, 1.0).build("tjentiste")
 
@@ -258,18 +332,18 @@ def _model_kosmaj():
         def E(r, y, t):
             return r * er + np.array([0, y, 0]) + t * et
         # lower blade: rises steeply from the core foot
-        low = [E(0.02, 0, 0.06), E(0.02, 0, -0.06), E(0.26, 0, 0.035), E(0.26, 0, -0.035), E(0.33, 0, 0.0),
-               E(0.03, 0.50, 0.05), E(0.03, 0.50, -0.05), E(0.40, 0.46, 0.0),
-               E(0.30, 0.47, 0.03), E(0.30, 0.47, -0.03)]
+        low = [E(0.02, 0, 0.045), E(0.02, 0, -0.045), E(0.24, 0, 0.022), E(0.24, 0, -0.022), E(0.31, 0, 0.0),
+               E(0.03, 0.50, 0.04), E(0.03, 0.50, -0.04), E(0.40, 0.46, 0.0),
+               E(0.30, 0.47, 0.025), E(0.30, 0.47, -0.025)]
         mb.hull(low)
         # upper blade: leans outwards to a needle tip
-        up = [E(0.03, 0.44, 0.05), E(0.03, 0.44, -0.05), E(0.30, 0.42, 0.03), E(0.30, 0.42, -0.03),
+        up = [E(0.03, 0.44, 0.04), E(0.03, 0.44, -0.04), E(0.30, 0.42, 0.025), E(0.30, 0.42, -0.025),
               E(0.40, 0.42, 0.0), E(0.64, 1.0, 0.0), E(0.10, 0.60, 0.02), E(0.10, 0.60, -0.02)]
         mb.hull(up)
     core = []
     for k in range(5):
         a = math.pi / 2 + (k + 0.5) * 2 * math.pi / 5
-        for y, r in ((0.0, 0.08), (0.55, 0.06)):
+        for y, r in ((0.0, 0.06), (0.55, 0.05)):
             core.append((r * math.cos(a), y, r * math.sin(a)))
     core.append((0, 0.62, 0))
     mb.hull(core)
@@ -285,7 +359,7 @@ def _model_jasenovac():
     """Stone Flower: narrow waist flaring into an open bloom of scalloped petals,
     with an inner ring of petals. Open shells rendered two-sided."""
     mb = MB()
-    nu = 72
+    nu = 60
     th = np.linspace(0, 2 * np.pi, nu, endpoint=False)
     # outer profile control points (r, y)
     prof = np.array([(0.30, 0.00), (0.24, 0.05), (0.17, 0.13), (0.13, 0.22), (0.12, 0.30),
@@ -293,16 +367,16 @@ def _model_jasenovac():
                      (0.50, 0.87), (0.58, 0.93), (0.64, 0.97), (0.68, 1.0)])
     nv = len(prof)
     v = np.linspace(0, 1, nv)
-    lob = _lobe(th + np.pi / 6, 6)
+    lob = _lobe(th + np.pi / 6, 6, 0.4)
     P = np.zeros((nv, nu, 3))
     for i, (r, y) in enumerate(prof):
         w = np.clip((v[i] - 0.3) / 0.7, 0, 1) ** 1.5
-        rr = r * (1 + 0.30 * w * (lob - 0.6))
-        yy = y + 0.15 * w * (lob - 0.6)
+        rr = r * (1 + 0.28 * w * (lob - 0.6))
+        yy = y + 0.24 * w * (lob - 0.6)
         P[i, :, 0] = rr * np.cos(th)
         P[i, :, 1] = yy
         P[i, :, 2] = rr * np.sin(th)
-    mb.grid(P, M_CONCRETE, wrap=True, two=True)
+    mb.grid(P, M_CONCRETE, wrap=True, two=True, ku=2, kv=1)
     # inner petals
     prof2 = np.array([(0.10, 0.28), (0.12, 0.40), (0.16, 0.52), (0.22, 0.63), (0.29, 0.72),
                       (0.35, 0.79), (0.39, 0.83)])
@@ -316,7 +390,7 @@ def _model_jasenovac():
         P2[i, :, 0] = rr * np.cos(th)
         P2[i, :, 1] = yy
         P2[i, :, 2] = rr * np.sin(th)
-    mb.grid(P2, M_INNER, wrap=True, two=True)
+    mb.grid(P2, M_INNER, wrap=True, two=True, ku=2, kv=1)
     # base plinth (low octagon)
     base = []
     for k in range(8):
@@ -385,36 +459,40 @@ def _tri(x):
 
 def _model_petrova_gora():
     """Petrova Gora: tall organic tower of folded vertical ribs over a few large
-    bulging lobes, wider at the bottom, with a curved domed top."""
+    bulging lobes, wider at the bottom, with a curved domed top rising to one side."""
     mb = MB()
-    nu, nv = 96, 22
+    ribs = 24
+    nu, nv = ribs * 4, 22
     th = np.linspace(0, 2 * np.pi, nu, endpoint=False)
-    lobe = 1 + 0.13 * np.cos(5 * th + 0.4) + 0.05 * np.cos(3 * th + 1.1)
-    Ht = 0.78 + 0.13 * np.cos(th - 0.5) + 0.06 * np.cos(5 * th + 0.4)
-    ribs = 26
+    lobe = 1 + 0.12 * np.cos(5 * th + 0.4) + 0.05 * np.cos(3 * th + 1.1)
+    Ht = 0.80 + 0.14 * np.cos(th - 0.5) + 0.05 * np.cos(5 * th + 0.4)
+    Hm = Ht.mean()
     P = np.zeros((nv, nu, 3))
     for i in range(nv):
         v = i / (nv - 1)
-        if v <= 0.78:
-            q = v / 0.78
-            rf = 1.0 - 0.36 * q ** 1.25 + 0.05 * math.sin(math.pi * q)
-            yf = 0.82 * q
+        if v <= 0.74:
+            q = v / 0.74
+            rf = 1.0 - 0.34 * q ** 1.2 + 0.06 * math.sin(math.pi * q)
+            yf = 0.80 * q
+            sm = 0.0
         else:
-            ph = (v - 0.78) / 0.22 * (math.pi / 2) * 0.93
-            rf0 = 1.0 - 0.36 + 0.0
-            rf = rf0 * math.cos(ph)
-            yf = 0.82 + 0.18 * math.sin(ph)
+            q = (v - 0.74) / 0.26
+            ph = q * (math.pi / 2) * 0.94
+            rf = 0.66 * math.cos(ph)
+            yf = 0.80 + 0.20 * math.sin(ph)
+            sm = q * q
         wave = 0.08 * math.sin(v * 6.0)
         fold = _tri(ribs * th / (2 * np.pi) + wave * ribs / (2 * np.pi))
-        r = 0.36 * rf * lobe * (1 + 0.045 * fold)
-        P[i, :, 0] = r * 1.1 * np.cos(th)
-        P[i, :, 2] = r * 0.9 * np.sin(th)
-        P[i, :, 1] = yf * Ht
-    ids = mb.grid(P, M_STEEL, wrap=True)
+        r = 0.26 * rf * lobe * (1 + 0.05 * fold)
+        H_eff = Ht * (1 - 0.5 * sm) + Hm * 0.5 * sm
+        P[i, :, 0] = r * 1.08 * np.cos(th)
+        P[i, :, 2] = r * 0.92 * np.sin(th)
+        P[i, :, 1] = yf * H_eff
+    ids = mb.grid(P, M_STEEL, wrap=True, ku=2, kv=3)
     top = P[-1].mean(0)
-    top[1] = P[-1, :, 1].max() + 0.005
-    mb.fan(list(ids[-1]), top, M_STEEL, up=True)
-    mb.fan(list(ids[0]), (0, 0, 0), M_STEEL, up=False)
+    top[1] = P[-1, :, 1].mean() + 0.01
+    mb.fan(list(ids[-1]), top, M_STEEL, up=True, k=8)
+    mb.fan(list(ids[0]), (0, 0, 0), M_STEEL, up=False, k=8)
     return _normalize(mb, 1.0).build("petrova_gora")
 
 
@@ -521,7 +599,7 @@ def _norm(v):
     return v / np.linalg.norm(v)
 
 
-_L_KEY = _norm((-0.55, 0.75, -0.55))     # towards key light (camera space: up-left-front)
+_L_KEY = _norm((-0.62, 0.48, -0.70))     # towards key light (camera space: up-left-front)
 _L_RIM = _norm((0.85, 0.30, 0.75))       # rim light from behind-right
 _L_FILL = _norm((0.6, -0.1, -0.5))
 
@@ -535,6 +613,13 @@ def _hash01(*xs):
 
 def _u8(c):
     return tuple(int(v) for v in np.clip(np.asarray(c) * 255.0 + 0.5, 0, 255))
+
+
+def _u8a(rgb, a):
+    """(F,3) premultiplied colour + (F,) alpha -> list of 4-tuples of ints."""
+    arr = np.concatenate([np.asarray(rgb, np.float64).reshape(-1, 3),
+                          np.broadcast_to(np.asarray(a, np.float64), (len(rgb),))[:, None]], 1)
+    return list(map(tuple, np.clip(arr * 255.0 + 0.5, 0, 255).astype(np.int64).tolist()))
 
 
 def _prep(mesh, yaw, pitch, W, H, zoom, cx, cy):
@@ -559,36 +644,34 @@ def _prep(mesh, yaw, pitch, W, H, zoom, cx, cy):
 
 
 def _composite(canvas, ss, W, H, bx0, by0, glow_amt, glow_r, post=None):
-    """canvas (CMYK raw premult RGBA at ss) -> full frame float32 straight RGBA."""
+    """canvas (CMYK-mode raw premultiplied RGBA at ss x) -> full frame float32
+    straight RGBA. Glow = blurred quarter-res copy, screen-composited (all in C)."""
     img = canvas.reduce(ss) if ss > 1 else canvas
-    a = np.asarray(img, dtype=np.float32) * (1.0 / 255.0)
-    h, w = a.shape[:2]
-    P = a[..., :3]
-    A = a[..., 3]
+    w, h = img.size
     if glow_amt > 0:
         k = 4
         small = img.reduce(k)
-        sm = Image.fromarray(np.asarray(small)[..., :3].copy(), "RGB")
         r1, r2 = glow_r
-        b1 = np.asarray(sm.filter(ImageFilter.GaussianBlur(max(0.5, r1 / k))), np.float32)
-        b2 = np.asarray(sm.filter(ImageFilter.GaussianBlur(max(0.5, r2 / k))), np.float32)
-        g = (b1 * 1.6 + b2 * 1.4) * (glow_amt / 255.0)
-        g = np.clip(g, 0, 1)
-        gi = Image.fromarray((g * 255 + 0.5).astype(np.uint8), "RGB").resize((w, h), Image.BILINEAR)
-        G = np.asarray(gi, np.float32) * (1.0 / 255.0)
-        P = P + G
-        A = A + (1.0 - A) * G.max(axis=2)
+        b1 = np.asarray(small.filter(ImageFilter.GaussianBlur(max(0.5, r1 / k))), np.float32)
+        b2 = np.asarray(small.filter(ImageFilter.GaussianBlur(max(0.5, r2 / k))), np.float32)
+        g = np.minimum((b1[..., :3] * 1.6 + b2[..., :3] * 1.4) * glow_amt, 255.0)
+        g4 = np.empty(g.shape[:2] + (4,), np.uint8)
+        g4[..., :3] = g
+        g4[..., 3] = g.max(axis=2)
+        gi = Image.frombuffer("CMYK", (g4.shape[1], g4.shape[0]), g4.tobytes(), "raw", "CMYK", 0, 1)
+        img = ImageChops.screen(img, gi.resize((w, h), Image.BILINEAR))
     if post is not None:
-        P, A = post(P, A, bx0, by0)
+        img = post(img, bx0, by0)
+    rgba = Image.frombuffer("RGBa", (w, h), img.tobytes(), "raw", "RGBa", 0, 1).convert("RGBA")
     out = np.zeros((H, W, 4), np.float32)
     x0, y0 = max(bx0, 0), max(by0, 0)
     x1, y1 = min(bx0 + w, W), min(by0 + h, H)
     if x1 <= x0 or y1 <= y0:
         return out
-    Ac = A[y0 - by0:y1 - by0, x0 - bx0:x1 - bx0]
-    Pc = P[y0 - by0:y1 - by0, x0 - bx0:x1 - bx0]
-    out[y0:y1, x0:x1, :3] = np.minimum(Pc / np.maximum(Ac, 1e-4)[..., None], 1.0)
-    out[y0:y1, x0:x1, 3] = np.clip(Ac, 0, 1)
+    if (x0, y0, x1, y1) != (bx0, by0, bx0 + w, by0 + h):
+        rgba = rgba.crop((x0 - bx0, y0 - by0, x1 - bx0, y1 - by0))
+    a = np.asarray(rgba, np.float32)
+    np.multiply(a, 1.0 / 255.0, out=out[y0:y1, x0:x1])
     return out
 
 
@@ -649,11 +732,17 @@ def render_model(t, dur, W, H, model="tjentiste", style="solid", yaw0=0.0, spin=
     hgt = (ycen - mesh.ymin) / max(mesh.ymax - mesh.ymin, 1e-6)
 
     def polypts(fi):
-        ids = mesh.polys[fi]
         out = []
-        for i in ids:
+        for i in mesh.faces[fi]:
             out.extend(Sl[i])
         return out
+
+    def draw_edges(fi, fill, width):
+        for run in mesh.runs[fi]:
+            pts = []
+            for i in run:
+                pts.extend(Sl[i])
+            draw.line(pts, fill=fill, width=width)
 
     ndl = np.clip(Nv @ _L_KEY, 0, 1)
     ndr = np.clip(Nv @ _L_RIM, 0, 1)
@@ -680,12 +769,15 @@ def render_model(t, dur, W, H, model="tjentiste", style="solid", yaw0=0.0, spin=
         glass = np.array([0.05, 0.07, 0.12])
         keyc = np.array([1.0, 0.95, 0.86])
         fillc = np.array([0.62, 0.70, 0.85])
-        light = (0.16 + 0.24 * hemi + 0.14 * ndf)[:, None] * fillc + (1.0 * ndl)[:, None] * keyc
+        bounce = np.clip(-Nv[:, 1], 0, 1) * 0.30
+        light = ((0.18 + 0.24 * hemi + 0.16 * ndf)[:, None] * fillc + (1.0 * ndl)[:, None] * keyc
+                 + bounce[:, None] * np.array([0.85, 0.78, 0.70]))
         ao = 0.55 + 0.45 * np.clip(hgt / 0.45, 0, 1) ** 0.7 if not is_star else np.ones_like(hgt)
         inside = flipn.astype(np.float64)
         ao = ao * (1 - 0.35 * inside)
         c = base * light * ao[:, None]
-        c *= (0.95 + 0.1 * mesh.tone)[:, None]
+        jit = np.where(mesh.mat == M_STEEL, 0.03, 0.10)
+        c *= (1.0 + jit * (mesh.tone - 0.5))[:, None]
         shiny = np.isin(mesh.mat, (M_RED, M_GOLD, M_STEEL)).astype(np.float64)
         sp = spec ** 24 * (0.25 + 0.75 * shiny)
         c += sp[:, None] * np.array([1.0, 0.97, 0.9]) * 0.55
@@ -698,37 +790,39 @@ def render_model(t, dur, W, H, model="tjentiste", style="solid", yaw0=0.0, spin=
         fogc = np.array([0.10, 0.11, 0.16])
         fg = (dn ** 1.5 * 0.40 * fog)[:, None]
         c = c * (1 - fg) + fogc * fg
-        cols = [_u8(list(ci) + [1.0]) for ci in np.clip(c, 0, 1)]
+        cols = _u8a(np.clip(c, 0, 1), 1.0)
         for fi in order:
             p = polypts(fi)
             draw.polygon(p, fill=cols[fi], outline=cols[fi])
     elif style in ("wire", "neon"):
-        ec = _col(edge, PAL["cyan"] if (style == "wire" and color == "cyan") else PAL["red"])
-        if style == "neon":
-            ec = _col(edge, (1.0, 0.16, 0.14))
+        ec = _col(edge, (1.0, 0.22, 0.2) if style == "wire" else (1.0, 0.16, 0.14))
         fa = fill_alpha if fill_alpha is not None else (0.0 if style == "wire" else 1.0)
-        fc = _col(color if style != "wire" or color not in ("cyan", "red") else None, (0.015, 0.012, 0.02))
-        if style == "neon" and color is None:
-            fc = np.array([0.03, 0.01, 0.015])
+        fc = _col(color, (0.015, 0.012, 0.02) if style == "wire" else (0.03, 0.01, 0.015))
         if style == "neon":
-            # pass 1: gold silhouette rim = fat outlines of all front faces
+            # pass 1: gold silhouette rim = fat lines on silhouette edges; pass 2's
+            # faces cover their inner half, leaving a rim just outside the outline.
             gold = _u8(list(PAL["gold"]) + [1.0])
             rimw = max(2, int(round(3.2 * px * ss * line)) * 2)
-            for fi in order:
-                p = polypts(fi)
-                draw.polygon(p, fill=gold)
-                draw.line(p + p[:2], fill=gold, width=rimw)
+            ef = mesh.edge_faces
+            v0 = vis[ef[:, 0]]
+            v1 = np.where(ef[:, 1] >= 0, vis[np.maximum(ef[:, 1], 0)], False)
+            f0 = facing[ef[:, 0]]
+            f1 = np.where(ef[:, 1] >= 0, facing[np.maximum(ef[:, 1], 0)], ~f0)
+            sil = (v0 | v1) & ((v0 != v1) | (f0 != f1) | (ef[:, 1] < 0))
+            r = rimw // 2
+            for i, j in mesh.all_edges[sil]:
+                (xa, ya), (xb, yb) = Sl[i], Sl[j]
+                draw.line((xa, ya, xb, yb), fill=gold, width=rimw)
+                draw.ellipse((xa - r, ya - r, xa + r, ya + r), fill=gold)
         shade = (0.35 + 0.65 * ndl) if style == "neon" else np.ones(len(ndl))
-        fade = 1.0 - 0.55 * dn
+        fade = 1.0 - 0.4 * dn
+        fcols = _u8a(fc[None, :] * (shade * (0.6 + 0.4 * fade) * fa)[:, None], fa)
+        ecols = _u8a(ec[None, :] * (fade if style == "wire" else (0.75 + 0.25 * fade))[:, None], 1.0)
+        lww = lw if style == "neon" else max(1, int(round(lw * 1.25)))
         for fi in order:
-            p = polypts(fi)
-            f = fc * shade[fi] * (0.6 + 0.4 * fade[fi])
-            draw.polygon(p, fill=_u8(list(f * fa) + [fa]))
-            e = ec * fade[fi]
-            if style == "neon":
-                e = ec * (0.75 + 0.25 * fade[fi])
-            draw.line(p + p[:2], fill=_u8(list(e) + [1.0]), width=lw)
-        glow_amt = glow * (1.0 if style == "wire" else 1.5)
+            draw.polygon(polypts(fi), fill=fcols[fi], outline=fcols[fi])
+            draw_edges(fi, ecols[fi], lww)
+        glow_amt = glow * (1.3 if style == "wire" else 1.5)
     elif style == "hologram":
         ec = _col(edge, PAL["cyan"])
         fc = _col(color, PAL["cyan"])
@@ -737,16 +831,16 @@ def render_model(t, dur, W, H, model="tjentiste", style="solid", yaw0=0.0, spin=
         back = back[np.argsort(-Cc[back, 2])]
         bc = _u8(list(ec * 0.22) + [0.22])
         for fi in back:
-            p = polypts(fi)
-            draw.line(p + p[:2], fill=bc, width=max(1, lw // 2))
+            draw_edges(fi, bc, max(1, lw // 2))
         fres = 1 - ndv
+        fa_h = 0.10 + 0.34 * fres ** 1.5 + 0.12 * ndl
+        fcols = _u8a(fc[None, :] * ((0.55 + 0.45 * ndl) * fa_h)[:, None], fa_h)
+        ea = 0.55 + 0.45 * (1 - dn)
+        ecols = _u8a(ec[None, :] * ea[:, None], ea)
+        lwh = max(1, int(lw * 0.75))
         for fi in order:
-            p = polypts(fi)
-            a = 0.10 + 0.34 * fres[fi] ** 1.5 + 0.12 * ndl[fi]
-            f = fc * (0.55 + 0.45 * ndl[fi])
-            draw.polygon(p, fill=_u8(list(f * a) + [a]))
-            ea = 0.55 + 0.45 * (1 - dn[fi])
-            draw.line(p + p[:2], fill=_u8(list(ec * ea) + [ea]), width=max(1, int(lw * 0.75)))
+            draw.polygon(polypts(fi), fill=fcols[fi])
+            draw_edges(fi, ecols[fi], lwh)
         glow_amt = glow * 0.9
         # flicker / scanlines / jitter (deterministic in t)
         fr = int(t * 30)
@@ -762,24 +856,24 @@ def render_model(t, dur, W, H, model="tjentiste", style="solid", yaw0=0.0, spin=
                 jit_rows.append((y0, hh, int(dx)))
         sweep = (t * 0.35) % 1.3 - 0.15
 
-        def post(P, A, bx, by):
-            h = P.shape[0]
+        def post(img, bx, by):
+            w, h = img.size
             rows = np.arange(by, by + h)
-            sl = np.where((rows // max(1, int(round(3 * px)))) % 2 == 0, 1.0, 0.55).astype(np.float32)
-            band = np.exp(-(((rows / H) - sweep) / 0.03) ** 2).astype(np.float32) * 0.6
-            m = (sl + band) * flick
-            P = P * m[:, None, None]
-            A = np.clip(A * m[:, None], 0, 1)
+            sl = np.where((rows // max(1, int(round(3 * px)))) % 2 == 0, 1.0, 0.55)
+            band = np.exp(-(((rows / H) - sweep) / 0.03) ** 2) * 0.45
+            m = np.clip((sl + band) * flick * 255.0, 0, 255).astype(np.uint8)
+            col = Image.frombuffer("L", (1, h), m.tobytes(), "raw", "L", 0, 1).resize((w, h), Image.NEAREST)
+            img = ImageChops.multiply(img, Image.merge("CMYK", (col, col, col, col)))
             for y0, hh, dx in jit_rows:
-                r0 = int(y0 * H) - by
-                r1 = r0 + int(hh * H)
-                r0, r1 = max(r0, 0), min(r1, h)
-                if r1 > r0:
-                    P[r0:r1] = np.roll(P[r0:r1], dx, axis=1)
-                    A[r0:r1] = np.roll(A[r0:r1], dx, axis=1)
-            return P, A
+                r0 = max(int(y0 * H) - by, 0)
+                r1 = min(r0 + int(hh * H), h)
+                if r1 > r0 and dx != 0:
+                    band_im = img.crop((0, r0, w, r1))
+                    img.paste((0, 0, 0, 0), (0, r0, w, r1))
+                    img.paste(band_im, (dx, r0))
+            return img
     elif style == "xray":
-        ec = _col(edge, PAL["cyan"] if color is None else color)
+        ec = _col(edge, PAL["cyan"])
         # faint body
         fa = 0.06
         fb = _u8(list(ec * 0.25 * fa) + [fa])
@@ -789,11 +883,13 @@ def render_model(t, dur, W, H, model="tjentiste", style="solid", yaw0=0.0, spin=
         E = mesh.edges
         ez = 0.5 * (Vc[E[:, 0], 2] + Vc[E[:, 1], 2])
         eo = np.argsort(-ez)
-        edn = np.clip((ez - (_CAM_D - 0.8)) / 1.6, 0, 1)
+        edn = np.clip((ez - zlo) / max(zhi - zlo, 1e-6), 0, 1)
+        ea = 1.0 - 0.72 * edn
+        ecols = _u8a(ec[None, :] * ea[:, None], ea)
+        lwx = max(1, lw)
         for k in eo:
-            a = 0.95 - 0.8 * edn[k]
             i, j = E[k]
-            draw.line(Sl[i] + Sl[j], fill=_u8(list(ec * a) + [a]), width=max(1, int(lw * 0.8)))
+            draw.line(Sl[i] + Sl[j], fill=ecols[k], width=lwx)
         glow_amt = glow * 0.8
     else:
         raise ValueError(f"unknown style {style!r}; choose from {STYLES}")

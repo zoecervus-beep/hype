@@ -368,7 +368,7 @@ def build_yugo():
 # ================================================================ EUROPE ===
 EU_PROJ = {"type": "laea", "lon0": 15.0, "lat0": 52.0}
 EU_SCALE = 1.0  # km
-EU_BBOX = (-32.0, 24.0, 72.0, 76.0)
+EU_BBOX = (-32.0, 24.0, 80.0, 80.0)
 USSR = ["RUS", "UKR", "BLR", "MDA", "EST", "LVA", "LTU", "GEO", "ARM", "AZE", "KAZ", "UZB",
         "TKM", "KGZ", "TJK", "KAB"]
 GDR_STATES = {"Mecklenburg-Vorpommern", "Brandenburg", "Berlin", "Sachsen", "Sachsen-Anhalt",

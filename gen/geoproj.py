@@ -25,6 +25,20 @@ def lcc(lon, lat, lon0=18.5, lat0=44.0, lat1=41.5, lat2=46.0, R=R_EARTH):
     return rho * np.sin(th), rho0 - rho * np.cos(th)
 
 
+def lcc_inv(x, y, lon0=18.5, lat0=44.0, lat1=41.5, lat2=46.0, R=R_EARTH):
+    """Inverse of :func:`lcc` (km -> lon, lat degrees)."""
+    x = np.asarray(x, dtype=np.float64)
+    y = np.asarray(y, dtype=np.float64)
+    l0, p0, p1, p2 = np.radians([lon0, lat0, lat1, lat2])
+    n = np.log(np.cos(p1) / np.cos(p2)) / np.log(np.tan(np.pi / 4 + p2 / 2) / np.tan(np.pi / 4 + p1 / 2))
+    F = np.cos(p1) * np.tan(np.pi / 4 + p1 / 2) ** n / n
+    rho0 = R * F / np.tan(np.pi / 4 + p0 / 2) ** n
+    rho = np.sign(n) * np.hypot(x, rho0 - y)
+    th = np.arctan2(x, rho0 - y)
+    lat = 2 * np.arctan((R * F / rho) ** (1 / n)) - np.pi / 2
+    return np.degrees(l0 + th / n), np.degrees(lat)
+
+
 def laea(lon, lat, lon0=15.0, lat0=52.0, R=R_EARTH):
     """Lambert azimuthal equal-area (spherical). Returns km."""
     lon = np.radians(np.asarray(lon, dtype=np.float64))
