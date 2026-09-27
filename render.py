@@ -56,7 +56,8 @@ def main():
     ap.add_argument("--stills", default=None)
     ap.add_argument("--sheet", nargs=3, default=None)
     ap.add_argument("--workers", type=int, default=os.cpu_count())
-    ap.add_argument("--crf", type=int, default=17)
+    ap.add_argument("--crf", type=int, default=20)
+    ap.add_argument("--maxrate", default="6M", help="VBV cap; keeps the 1080p file under ~85 MB")
     args = ap.parse_args()
 
     from edit.sfrj import build
@@ -109,15 +110,17 @@ def main():
     if has_audio:
         cmd += ["-ss", f"{args.start:.4f}", "-t", f"{(f1 - f0) / fps:.4f}", "-i", args.audio]
     cmd += ["-c:v", "libx264", "-preset", "slow", "-crf", str(args.crf), "-pix_fmt", "yuv420p",
-            "-tune", "grain", "-x264-params", "aq-mode=3",
-            "-r", str(fps)]
+            "-maxrate", args.maxrate, "-bufsize", args.maxrate,
+            "-x264-params", "aq-mode=3", "-r", str(fps)]
     if has_audio:
         cmd += ["-c:a", "aac", "-b:a", "320k", "-shortest"]
     cmd += ["-movflags", "+faststart", args.out]
     proc = subprocess.Popen(cmd, stdin=subprocess.PIPE)
     t_start = time.time()
     with mp.Pool(args.workers, _init, (args.scale,)) as pool:
-        for n, (i, buf) in enumerate(pool.imap(_frame, frames, chunksize=2)):
+        it = pool.imap(_frame, frames, chunksize=1)
+        for n in range(len(frames)):
+            i, buf = it.next(timeout=180)  # a dead worker raises instead of hanging forever
             proc.stdin.write(buf)
             if n % 60 == 0:
                 el = time.time() - t_start

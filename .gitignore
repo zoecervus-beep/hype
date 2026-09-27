@@ -9,3 +9,5 @@ out/*.mp4
 out/audio/stems/
 out/preview_half.mp4
 out/audio/
+out/render_log.txt
+out/test_seg.mp4

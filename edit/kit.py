@@ -444,14 +444,18 @@ def S_img_text(text, photo, fname="anton", size=0.6, cx=0.5, cy=0.5, zoom=(1.0, 
             ph = fx.grade(ph, grade)
         sz = min(size * H, tx.fit_size(text, fname, fit_w * W, H, tracking))
         L = _L(text, fname, int(sz), WHITE, tracking)
-        s = 1.0
+        lay = tx.mask_image_with_text(ph, L, cx, cy, 1.0)
         if open_at is not None and c.lt > open_at:
+            # zoom through the letters by transforming the frame-sized mask (never a giant layer)
             q = min((c.lt - open_at) / open_dur, 1)
-            s = 1 + ease_in_cubic(q) * 30
             if q >= 1:
                 return ph
+            s = 1 + ease_in_cubic(q) * 30
+            m = Image.fromarray((lay[..., 3] * 255).astype(np.uint8), "L")
+            m = m.transform((W, H), Image.AFFINE, (1 / s, 0, cx * W * (1 - 1 / s), 0, 1 / s, cy * H * (1 - 1 / s)),
+                            resample=Image.BILINEAR)
+            lay[..., 3] = np.asarray(m, np.float32) / 255.0
         out = blank(W, H, bg)
-        lay = tx.mask_image_with_text(ph, L, cx, cy, s)
         over(out, lay)
         return out
     return f
