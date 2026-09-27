@@ -113,7 +113,9 @@ def main():
             "-maxrate", args.maxrate, "-bufsize", args.maxrate,
             "-x264-params", "aq-mode=3", "-r", str(fps)]
     if has_audio:
-        cmd += ["-c:a", "aac", "-b:a", "320k", "-shortest"]
+        # pad audio with silence to the picture length (credits run past the music) and leave
+        # headroom for AAC inter-sample overshoot
+        cmd += ["-af", "volume=-1.6dB,apad", "-c:a", "aac", "-b:a", "320k", "-t", f"{(f1 - f0) / fps:.4f}"]
     cmd += ["-movflags", "+faststart", args.out]
     proc = subprocess.Popen(cmd, stdin=subprocess.PIPE)
     t_start = time.time()
