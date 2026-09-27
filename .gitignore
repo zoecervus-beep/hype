@@ -4,7 +4,6 @@ out/cache/
 out/stills/
 out/preview/
 out/*.mp4
-!out/sfrj_hype.mp4
 *.whl
 out/audio/stems/
 out/preview_half.mp4
